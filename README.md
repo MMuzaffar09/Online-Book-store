@@ -42,3 +42,5 @@ npm run build
 ```
 
 The `.env` file is intentionally excluded from Git. Never commit private credentials or secrets.
+
+<!-- Deployment sync: latest production source -->
