@@ -94,6 +94,9 @@ export function useAuth() {
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data.error || 'Unable to send OTP. Please try again.');
+    if (data.test_otp) {
+      window.alert(`Development OTP: ${data.test_otp}\n\nSMS is not configured yet. This OTP is for testing only.`);
+    }
     return { expiresIn: data.expires_in ?? 300 };
   }, []);
 
