@@ -10,8 +10,9 @@ export type AuthProfile = {
 };
 
 function getEdgeFunctionUrl(): string {
-  const url = import.meta.env.VITE_SUPABASE_URL || (supabase as unknown as { supabaseUrl: string }).supabaseUrl || '';
-  return `${url}/functions/v1/phone-auth`;
+  const envUrl = import.meta.env.VITE_SUPABASE_URL || import.meta.env.SUPABASE_URL || '';
+  const clientUrl = supabase ? (supabase as unknown as { supabaseUrl?: string }).supabaseUrl || '' : '';
+  return `${envUrl || clientUrl}/functions/v1/phone-auth`;
 }
 
 export function useAuth() {
@@ -20,13 +21,20 @@ export function useAuth() {
   const [loading, setLoading] = useState(true);
 
   const fetchProfile = useCallback(async (user: User) => {
-    if (!supabase) return;
-    const { data } = await supabase
+    if (!supabase) {
+      setProfile(null);
+      return;
+    }
+    const { data, error } = await supabase
       .from('profiles')
       .select('id, email, full_name, role')
       .eq('id', user.id)
       .maybeSingle();
-    if (data) setProfile(data as AuthProfile);
+    if (error || !data) {
+      setProfile(null);
+      return;
+    }
+    setProfile(data as AuthProfile);
   }, []);
 
   useEffect(() => {
@@ -35,60 +43,71 @@ export function useAuth() {
       return;
     }
 
+    let mounted = true;
     supabase.auth.getSession().then(({ data }) => {
+      if (!mounted) return;
       setSession(data.session);
       if (data.session?.user) {
-        void fetchProfile(data.session.user).finally(() => setLoading(false));
+        void fetchProfile(data.session.user).finally(() => {
+          if (mounted) setLoading(false);
+        });
       } else {
+        setProfile(null);
         setLoading(false);
       }
     });
 
     const { data: listener } = supabase.auth.onAuthStateChange((_event, newSession) => {
-      (async () => {
-        setSession(newSession);
-        if (newSession?.user) {
-          await fetchProfile(newSession.user);
-        } else {
-          setProfile(null);
-        }
+      if (!mounted) return;
+      setSession(newSession);
+      if (newSession?.user) {
+        void fetchProfile(newSession.user).finally(() => {
+          if (mounted) setLoading(false);
+        });
+      } else {
+        setProfile(null);
         setLoading(false);
-      })();
+      }
     });
 
     return () => {
+      mounted = false;
       listener.subscription.unsubscribe();
     };
   }, [fetchProfile]);
 
   const signIn = useCallback(async (email: string, password: string) => {
-    if (!supabase) throw new Error('Database connection is not available.');
+    if (!supabase) throw new Error('Database connection is not available. Add the Supabase environment variables in your deployment settings.');
     const { error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) throw error;
   }, []);
 
   const sendPhoneOtp = useCallback(async (name: string, phone: string): Promise<{ expiresIn: number }> => {
-    if (!supabase) throw new Error('Database connection is not available.');
-    const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
-    const res = await fetch(getEdgeFunctionUrl(), {
+    if (!supabase) throw new Error('Database connection is not available. Add the Supabase environment variables in your deployment settings.');
+    const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || '';
+    const functionUrl = getEdgeFunctionUrl();
+    if (!functionUrl || !anonKey) throw new Error('Supabase configuration is incomplete.');
+    const res = await fetch(functionUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${anonKey}` },
       body: JSON.stringify({ action: 'send', name, phone }),
     });
-    const data = await res.json();
+    const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data.error || 'Unable to send OTP. Please try again.');
     return { expiresIn: data.expires_in ?? 300 };
   }, []);
 
   const verifyPhoneOtp = useCallback(async (phone: string, code: string, name: string): Promise<void> => {
-    if (!supabase) throw new Error('Database connection is not available.');
-    const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
-    const res = await fetch(getEdgeFunctionUrl(), {
+    if (!supabase) throw new Error('Database connection is not available. Add the Supabase environment variables in your deployment settings.');
+    const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || '';
+    const functionUrl = getEdgeFunctionUrl();
+    if (!functionUrl || !anonKey) throw new Error('Supabase configuration is incomplete.');
+    const res = await fetch(functionUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${anonKey}` },
       body: JSON.stringify({ action: 'verify', phone, code, name }),
     });
-    const data = await res.json();
+    const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data.error || 'Verification failed.');
 
     if (data.token_hash) {
