@@ -15,6 +15,24 @@ function getEdgeFunctionUrl(): string {
   return `${envUrl || clientUrl}/functions/v1/phone-auth`;
 }
 
+function showDevelopmentOtp(otp: string) {
+  const existing = document.getElementById('development-otp-banner');
+  if (existing) existing.remove();
+
+  const banner = document.createElement('div');
+  banner.id = 'development-otp-banner';
+  banner.setAttribute('role', 'status');
+  banner.style.cssText = [
+    'position:fixed', 'top:20px', 'left:50%', 'transform:translateX(-50%)', 'z-index:99999',
+    'background:#fff', 'border:2px solid #d9b477', 'border-radius:12px', 'padding:16px 22px',
+    'box-shadow:0 10px 30px rgba(0,0,0,.18)', 'font-family:Arial,sans-serif', 'text-align:center',
+    'min-width:280px', 'color:#183b37'
+  ].join(';');
+  banner.innerHTML = `<div style="font-size:12px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;margin-bottom:6px">Development OTP</div><div style="font-size:28px;font-weight:800;letter-spacing:5px">${otp}</div><div style="font-size:12px;margin-top:7px;color:#777">Testing only — SMS is not configured.</div>`;
+  document.body.appendChild(banner);
+  window.setTimeout(() => banner.remove(), 30000);
+}
+
 export function useAuth() {
   const [session, setSession] = useState<Session | null>(null);
   const [profile, setProfile] = useState<AuthProfile | null>(null);
@@ -94,9 +112,7 @@ export function useAuth() {
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data.error || 'Unable to send OTP. Please try again.');
-    if (data.test_otp) {
-      window.alert(`Development OTP: ${data.test_otp}\n\nSMS is not configured yet. This OTP is for testing only.`);
-    }
+    if (data.test_otp) showDevelopmentOtp(String(data.test_otp));
     return { expiresIn: data.expires_in ?? 300 };
   }, []);
 
